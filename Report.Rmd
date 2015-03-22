@@ -1,0 +1,130 @@
+---
+title: "Practical Machine Learning - Course Project"
+output: html_document
+---
+
+## Introduction  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+
+In this project, our goal is to use the data to predict the manner in which they did the exercise.
+
+
+## Data Processing  
+```{r warning=FALSE,results='hide', message=FALSE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(e1071)
+```
+Set the seed to ensure reproduceablity
+```{r}
+set.seed(12345)
+```
+
+### Download the Data
+```{r}
+trainingDataUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testDataUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists("./data/pml-training.csv")) {
+  download.file(trainingDataUrl, destfile="./data/pml-training.csv", method="curl")
+  
+}
+if (!file.exists("./data/pml-testing.csv")) {
+  download.file(testDataUrl, destfile="./data/pml-testing.csv", method="curl")
+}
+```
+
+### Read the Data
+```{r}
+trainingDataRaw <- read.csv("./data/pml-training.csv")
+testDataRaw <- read.csv("./data/pml-testing.csv")
+dim(trainingDataRaw)
+dim(testDataRaw)
+```
+The training data set contains `r dim(trainingDataRaw)[1]` observations and `r dim(trainingDataRaw)[2]` variables, while the testing data set contains `r dim(testDataRaw)[1]` observations and `r dim(testDataRaw)[2]` variables. The "classe" variable in the training set is the outcome to predict. 
+
+### Data Cleaning
+Remove columns that contain NA missing value
+```{r}
+trainingDataRaw <- trainingDataRaw[, colSums(is.na(trainingDataRaw)) == 0] 
+testDataRaw <- testDataRaw[, colSums(is.na(testDataRaw)) == 0] 
+```
+Remove columns that do not contribute to the accelerometer measurements.
+```{r}
+classe <- trainingDataRaw$classe
+trainingDataRemove <- grepl("^X|timestamp|window", names(trainingDataRaw))
+trainingDataRaw <- trainingDataRaw[, !trainingDataRemove]
+trainingDataCleaned <- trainingDataRaw[, sapply(trainingDataRaw, is.numeric)]
+trainingDataCleaned$classe <- classe
+testDataRemove <- grepl("^X|timestamp|window", names(testDataRaw))
+testDataRaw <- testDataRaw[, !testDataRemove]
+testDataCleaned <- testDataRaw[, sapply(testDataRaw, is.numeric)]
+```
+The cleaned training data set contains `r dim(trainingDataCleaned)[1]` observations and `r dim(trainingDataCleaned)[2]` variables, while the testing data set contains `r dim(testDataCleaned)[1]` observations and `r dim(testDataCleaned)[2]` variables. The "classe" variable is still in the cleaned training set.
+
+### Partitioning the Data
+```{r}
+inTraining <- createDataPartition(trainingDataCleaned$classe, p=0.70, list=F)
+trainingData <- trainingDataCleaned[inTraining, ]
+testData <- trainingDataCleaned[-inTraining, ]
+```
+
+### Modeling
+We creates a predictive model for activity recognition using Random Forest algorithm and applying 5-fold cross validation to the algorithm.
+
+```{r}
+controlRandomForest <- trainControl(method="cv", 5)
+modelRandomForest <- train(classe ~ ., data=trainingData , method="rf", trControl=controlRandomForest, ntree=250)
+modelRandomForest
+```
+
+Next, using the validation data set, we estimate the performance of the model.
+
+```{r}
+predictRandomForest <- predict(modelRandomForest, testData)
+confusionMatrix(testData$classe, predictRandomForest)
+```
+
+```{r}
+accuracy <- postResample(predictRandomForest, testData$classe)
+accuracy
+```
+
+```{r}
+outOfSampleError <- 1 - as.numeric(confusionMatrix(testData$classe, predictRandomForest)$overall[1])
+outOfSampleError 
+```
+
+Hence, the estimated accuracy of the model is `r paste(round(accuracy[1], 2), "%", sep="")` and the estimated out-of-sample error is `r paste(round(outOfSampleError, 2), "%", sep="")`.
+
+### Result
+```{r}
+result <- predict(modelRandomForest, testDataCleaned[, -length(names(testDataCleaned))])
+result
+```
+
+### Prediction Assignment Submission
+```{r}
+if (!file.exists("./answers")) {
+  dir.create("./answers")
+}
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("./answers/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+```
+
+```{r}
+pml_write_files(result)
+```
